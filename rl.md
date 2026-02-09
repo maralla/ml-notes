@@ -27,12 +27,27 @@ PPO trains two neural networks simultaneously:
 - Loss: $L^{VF}$ (mean squared error)
 
 **Training Process:**
-1. Collect experiences with current policy
-2. Compute advantages $\hat{A}_t$ using current value network and detach them from gradient computation
-3. Update both networks on the same batch (multiple epochs):
-   - Policy uses fixed $\hat{A}_t$ to improve action selection
-   - Value network learns to better predict returns
-4. Repeat with new experiences
+1. **Collect experiences**: Agent interacts with environment using current policy
+   - Collect: states $[s_0, s_1, ..., s_T]$, actions $[a_0, a_1, ...]$, rewards $[r_0, r_1, ...]$
+
+2. **Compute advantages**:
+   - Forward pass value network on all states: get all value estimates
+   - Calculate TD residuals for each timestep
+   - Calculate GAE to get all advantages
+   - Detach advantages from gradient computation (treat as constants)
+
+3. **Update both networks** (multiple epochs on same batch):
+   - **Policy network**: 
+     - Forward pass: compute $\pi_\theta(a_t|s_t)$ for all states
+     - Compute $L^{CLIP}$ using frozen advantages $\hat{A}_t$
+     - Backprop and update $\theta$
+   - **Value network**:
+     - Forward pass: compute $V_\phi(s_t)$ for all states
+     - Compute $L^{VF}$ comparing to targets $V^{target}_t$
+     - Backprop and update $\phi$
+   - (Often combined into single $L^{TOTAL}$ and updated together)
+
+4. **Repeat**: Collect new experiences with updated policy
 
 ### Loss Function
 
@@ -121,3 +136,28 @@ Parameters:
 - $\lambda$ (lambda): GAE parameter that controls bias-variance tradeoff (typically 0.95)
 - $V(s_t)$: value function estimate at state $s_t$
 - $r_t$: reward at time $t$
+
+### How is V(s) Calculated
+
+The value function $V(s_t)$ is computed by the **value network** (critic):
+
+**Training Target:**
+
+The value network learns by minimizing the difference between its prediction and the actual observed return:
+
+$$
+V^{target}_t = r_t + \gamma r_{t+1} + \gamma^2 r_{t+2} + \cdots + \gamma^{T-t} r_{T-1}
+$$
+
+This is the **actual total discounted reward** observed from state $s_t$ to the end of the episode.
+
+**Training:**
+- Collect trajectory and observe all rewards
+- Compute targets: $V^{target}_t$ for each state (sum of future rewards)
+- Update network to minimize: $L^{VF} = (V_\phi(s_t) - V^{target}_t)^2$
+- Over time, the network learns to predict future rewards accurately
+
+**Usage:**
+- Once trained, just forward pass: $V(s_t) = V_\phi(s_t)$
+- Used to compute TD residuals and advantages
+- Continuously updated during PPO training
