@@ -35,22 +35,10 @@ $$o_t = \sigma(W_o \cdot [h_{t-1}, x_t] + b_o)$$
 $$h_t = o_t \odot \tanh(c_t)$$
 
 ### Notation
-
-**Sigmoid function:** Range $(0, 1)$
-
-$$\sigma(z) = \frac{1}{1 + e^{-z}}$$
-
-**Hyperbolic tangent:** Range $(-1, 1)$
-
-$$\tanh(z) = \frac{e^z - e^{-z}}{e^z + e^{-z}}$$
-
-**Element-wise multiplication:**
-
-$$\odot$$
-
-**Vector concatenation:**
-
-$$[h_{t-1}, x_t]$$
+- $\sigma(z) = \frac{1}{1 + e^{-z}}$: Sigmoid function, range $(0, 1)$
+- $\tanh(z) = \frac{e^z - e^{-z}}{e^z + e^{-z}}$: Hyperbolic tangent, range $(-1, 1)$
+- $\odot$: Element-wise (Hadamard) multiplication
+- $[h_{t-1}, x_t]$: Vector concatenation
 
 ---
 
