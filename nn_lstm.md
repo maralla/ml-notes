@@ -35,10 +35,22 @@ $$o_t = \sigma(W_o \cdot [h_{t-1}, x_t] + b_o)$$
 $$h_t = o_t \odot \tanh(c_t)$$
 
 ### Notation
-- $\sigma(z) = \frac{1}{1 + e^{-z}}$: Sigmoid function, range $(0, 1)$
-- $\tanh(z) = \frac{e^z - e^{-z}}{e^z + e^{-z}}$: Hyperbolic tangent, range $(-1, 1)$
-- $\odot$: Element-wise (Hadamard) multiplication
-- $[h_{t-1}, x_t]$: Vector concatenation
+
+**Sigmoid function:** Range $(0, 1)$
+
+$$\sigma(z) = \frac{1}{1 + e^{-z}}$$
+
+**Hyperbolic tangent:** Range $(-1, 1)$
+
+$$\tanh(z) = \frac{e^z - e^{-z}}{e^z + e^{-z}}$$
+
+**Element-wise multiplication:**
+
+$$\odot$$
+
+**Vector concatenation:**
+
+$$[h_{t-1}, x_t]$$
 
 ---
 
@@ -95,45 +107,59 @@ For an LSTM with `hidden_size=48`:
 
 **Instead of storing raw data:**
 ```
-Frame 180: velocity = [10.2, 3.1, 0.5]
-Frame 181: velocity = [10.3, 3.0, 0.5]
+Timestep 180: input = [0.52, 0.31, 0.15, ...]
+Timestep 181: input = [0.53, 0.30, 0.15, ...]
 ...
 ```
 
 **LSTM encodes patterns:**
 ```
-Dimension 7: "accelerating forward while turning" = 0.73
-Dimension 8: "rate of turn increase" = 0.21
-Dimension 12: "drift maneuver active" = 0.85
+Dimension 7: "increasing trend detected" = 0.73
+Dimension 8: "rate of change" = 0.21
+Dimension 12: "periodic pattern active" = 0.85
 ```
 
 ### Temporal Decay
 
 Information naturally decays over time:
-- Recent timesteps: strong influence (weight $\approx 1.0$)
-- Older timesteps: weak influence (weight $\approx 0.1$)
-- Very old timesteps: negligible influence (weight $\approx 0.01$)
+
+- Recent timesteps: strong influence
+  $$\text{weight} \approx 1.0$$
+
+- Older timesteps: weak influence
+  $$\text{weight} \approx 0.1$$
+
+- Very old timesteps: negligible influence
+  $$\text{weight} \approx 0.01$$
 
 The LSTM doesn't need to remember all timesteps equally - older information contributes less to current decisions.
 
-### Example: Tracking a Maneuver
+### Example: Tracking a Pattern
 
-**Timestep 0-10:** Normal state
+**Timestep 0-10:** Baseline state
+
 $$c[12] = 0.05$$
 
-**Timestep 11:** Maneuver initiated
+**Timestep 11:** Pattern detected
+
 $$f_t[12] = 0.90, \quad i_t[12] = 0.80, \quad \tilde{c}_t[12] = 0.95$$
+
 $$c_t[12] = 0.90 \times 0.05 + 0.80 \times 0.95 = 0.805$$
 
-**Timestep 12-20:** Maintaining maneuver
+**Timestep 12-20:** Pattern continues
+
 $$f_t[12] \approx 0.95 \text{ (high retention)}$$
+
 $$c_t[12] \text{ gradually increases: } 0.805 \to 0.88 \to 0.91 \to 0.93$$
 
-**Timestep 21:** Maneuver ending
+**Timestep 21:** Pattern fading
+
 $$f_t[12] = 0.70 \text{ (start forgetting)}$$
+
 $$c_t[12] = 0.70 \times 0.93 + 0.20 \times 0.30 = 0.711$$
 
-**Timestep 30:** Back to normal
+**Timestep 30:** Back to baseline
+
 $$f_t[12] \to 0.10, \quad c_t[12] \to 0.05$$
 
 ---
@@ -144,39 +170,46 @@ $$f_t[12] \to 0.10, \quad c_t[12] \to 0.05$$
 All weight matrices start with random values:
 $$W_f, W_i, W_o, W_c \sim \mathcal{N}(0, 0.1)$$
 
+Biases typically initialized to zero or small constants.
+
 ### 2. Forward Pass
-Agent acts in environment using current weights:
-$$x_t \to \text{LSTM} \to h_t \to \text{policy} \to \text{action}_t$$
+Process input sequence through LSTM:
+$$x_1, x_2, \ldots, x_T \to h_1, h_2, \ldots, h_T$$
+
+Generate predictions from hidden states:
+
+$$\hat{y}_t = f(h_t)$$
+
+where $f$ is an output layer (linear layer for regression, softmax for classification).
 
 ### 3. Loss Computation
-After collecting trajectory with rewards $\{r_1, r_2, \ldots, r_T\}$:
 
-**Returns (discounted future rewards):**
-$$G_t = \sum_{k=0}^{\infty} \gamma^k r_{t+k}$$
+**For Classification (e.g., next word prediction):**
 
-**Policy Loss (PPO-style):**
-$$\mathcal{L}_{\text{policy}} = -\mathbb{E}[\log \pi(a_t | s_t) \cdot A_t]$$
+$$\mathcal{L} = -\frac{1}{T} \sum_{t=1}^{T} \sum_{k=1}^{K} y_t^{(k)} \log \hat{y}_t^{(k)}$$
 
-where $A_t = G_t - V(s_t)$ is the advantage.
+where $K$ is the number of classes.
 
-**Value Loss:**
-$$\mathcal{L}_{\text{value}} = \mathbb{E}[(G_t - V(s_t))^2]$$
+**For Regression (e.g., time series forecasting):**
 
-**Total Loss:**
-$$\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{policy}} + c_v \mathcal{L}_{\text{value}}$$
+$$\mathcal{L} = \frac{1}{T} \sum_{t=1}^{T} (y_t - \hat{y}_t)^2$$
 
-### 4. Backpropagation
-Compute gradients for all parameters:
+### 4. Backpropagation Through Time (BPTT)
+Compute gradients for all parameters by unrolling the network through time:
+
 $$\frac{\partial \mathcal{L}}{\partial W_f}, \quad \frac{\partial \mathcal{L}}{\partial W_i}, \quad \frac{\partial \mathcal{L}}{\partial W_o}, \quad \frac{\partial \mathcal{L}}{\partial W_c}$$
 
+Gradients flow backward through the sequence, with the cell state path preventing vanishing gradients.
+
 ### 5. Weight Update
-Gradient descent:
+Apply optimizer (SGD, Adam, etc.):
+
 $$W \leftarrow W - \alpha \frac{\partial \mathcal{L}}{\partial W}$$
 
 where $\alpha$ is the learning rate.
 
 ### 6. Iteration
-Repeat for millions of timesteps until convergence.
+Repeat over training dataset for multiple epochs until convergence.
 
 ---
 
@@ -228,19 +261,23 @@ The roles are architectural; the policies are learned.
 
 An LSTM with `hidden_size=48` processing sequences of length 200 does NOT store 200 timesteps explicitly.
 
-**Storage would require:** $200 \times d_{input}$ dimensions
+**Storage would require:**
 
-**LSTM uses:** $48$ dimensions
+$$200 \times d_{\text{input}} \text{ dimensions}$$
+
+**LSTM uses:**
+
+$$48 \text{ dimensions}$$
 
 ### Compression Mechanism
 
 The 48-dimensional state encodes **patterns and abstractions**, not raw data:
 
 **Example encodings (hypothetical):**
-- Dimension 1-5: Current maneuver state
-- Dimension 6-10: Trajectory prediction  
-- Dimension 11-15: Recent collision events
-- Dimension 16-20: Timing/cooldown states
+- Dimension 1-5: Current trend direction
+- Dimension 6-10: Pattern phase tracking
+- Dimension 11-15: Recent anomaly detection
+- Dimension 16-20: Periodic cycle state
 - ...
 
 Each dimension is a continuous value encoding abstract temporal concepts.
@@ -250,11 +287,20 @@ Each dimension is a continuous value encoding abstract temporal concepts.
 **Selective retention through gates:**
 
 For dimension $j$ at timestep $t$:
+
 $$c_t[j] = f_t[j] \cdot c_{t-1}[j] + i_t[j] \cdot \tilde{c}_t[j]$$
 
-**Long-term memory:** $f_t[j] \approx 0.95-0.99$ (minimal decay)
-**Medium-term memory:** $f_t[j] \approx 0.7-0.9$ (gradual decay)
-**Short-term memory:** $f_t[j] \approx 0.1-0.5$ (rapid decay)
+**Long-term memory:** Minimal decay
+
+$$f_t[j] \approx 0.95\text{-}0.99$$
+
+**Medium-term memory:** Gradual decay
+
+$$f_t[j] \approx 0.7\text{-}0.9$$
+
+**Short-term memory:** Rapid decay
+
+$$f_t[j] \approx 0.1\text{-}0.5$$
 
 ### Effective Memory Span
 
@@ -274,7 +320,9 @@ For `hidden_size=h` and `input_size=d`:
 
 $$W_f, W_i, W_o, W_c \in \mathbb{R}^{h \times (h + d)}$$
 
-Each matrix has $h \times (h + d)$ learnable parameters.
+Each matrix has learnable parameters:
+
+$$h \times (h + d)$$
 
 ### What Each Matrix Does
 
@@ -298,9 +346,13 @@ For dimension $j$, the forget gate value is:
 
 $$f_t[j] = \sigma\left(\sum_{k=1}^{h+d} W_f[j,k] \cdot z_t[k] + b_f[j]\right)$$
 
-where $z_t = [h_{t-1}, x_t]$ is the concatenated input.
+where the concatenated input is:
 
-Each weight $W_f[j,k]$ controls how much input feature $k$ influences the forget decision for dimension $j$.
+$$z_t = [h_{t-1}, x_t]$$
+
+Each weight controls how much input feature $k$ influences the forget decision for dimension $j$:
+
+$$W_f[j,k]$$
 
 ---
 
@@ -309,38 +361,51 @@ Each weight $W_f[j,k]$ controls how much input feature $k$ influences the forget
 ### Why LSTM Solves Vanishing Gradients
 
 **Regular RNN gradient:**
+
 $$\frac{\partial h_T}{\partial h_0} = \prod_{t=1}^{T} \left(W_h \cdot \tanh'(\cdot)\right)$$
 
-Product of many terms $< 1$ causes vanishing.
+Product of many terms less than 1 causes vanishing:
+
+$$\text{term} < 1$$
 
 **LSTM gradient:**
+
 $$\frac{\partial c_t}{\partial c_{t-1}} = f_t$$
 
 $$\frac{\partial c_T}{\partial c_0} = \prod_{t=1}^{T} f_t$$
 
-If $f_t \approx 1$, gradient doesn't vanish!
+If forget gate is close to 1, gradient doesn't vanish:
+
+$$f_t \approx 1$$
 
 ### How Weights Are Learned
 
-**Step 1:** Forward pass produces actions and predictions
+**Step 1:** Forward pass produces predictions
 
-**Step 2:** Environment provides rewards
+**Step 2:** Compare predictions to ground truth labels
 
-**Step 3:** Compute loss (how good were the actions?)
+**Step 3:** Compute loss (how wrong were the predictions?)
 
 **Step 4:** Backpropagation computes gradients:
+
 $$\frac{\partial \mathcal{L}}{\partial W_f}, \quad \frac{\partial \mathcal{L}}{\partial W_i}, \quad \frac{\partial \mathcal{L}}{\partial W_o}, \quad \frac{\partial \mathcal{L}}{\partial W_c}$$
 
 **Step 5:** Update weights:
+
 $$W \leftarrow W - \alpha \frac{\partial \mathcal{L}}{\partial W}$$
 
-**Step 6:** Repeat millions of times
+**Step 6:** Repeat over training dataset
 
 ### What Gets Learned
 
 Through training, different dimensions specialize:
-- Some dimensions track long-term state (high $f_t$)
-- Some dimensions track short-term events (low $f_t$)
+
+- Some dimensions track long-term state: high forget gate
+  $$f_t \approx 1$$
+
+- Some dimensions track short-term events: low forget gate
+  $$f_t \approx 0$$
+
 - Some dimensions respond to specific input patterns
 - Specialization emerges automatically from gradient descent
 
@@ -350,22 +415,35 @@ Through training, different dimensions specialize:
 
 ### 1. Architectural Roles Are Fixed
 The LSTM equations **hardcode** what each matrix does:
-- $W_f$ must multiply with $c_{t-1}$ (architectural constraint)
-- $W_i$ must multiply with $\tilde{c}_t$ (architectural constraint)
-- $W_o$ must multiply with $\tanh(c_t)$ (architectural constraint)
+
+- Forget gate must multiply with previous cell state (architectural constraint):
+  $$W_f \text{ produces } f_t \text{ which multiplies } c_{t-1}$$
+
+- Input gate must multiply with cell candidate (architectural constraint):
+  $$W_i \text{ produces } i_t \text{ which multiplies } \tilde{c}_t$$
+
+- Output gate must multiply with cell state (architectural constraint):
+  $$W_o \text{ produces } o_t \text{ which multiplies } \tanh(c_t)$$
 
 You cannot swap their roles - the role comes from their position in the equations.
 
 ### 2. Learning Determines Policies
 Training determines:
-- WHEN to forget (not THAT $W_f$ controls forgetting)
-- WHAT to add (not THAT $W_i$ controls addition)
-- WHEN to expose (not THAT $W_o$ controls output)
+- WHEN to forget (not THAT forget gate controls forgetting)
+- WHAT to add (not THAT input gate controls addition)
+- WHEN to expose (not THAT output gate controls output)
 
 ### 3. Gates Can Learn Opposite Behaviors
-- "Forget gate" can learn to NOT forget ($f_t \to 1$)
-- "Input gate" can learn to block input ($i_t \to 0$)
-- Behavior depends on what minimizes loss
+
+Forget gate can learn to NOT forget:
+
+$$f_t \to 1$$
+
+Input gate can learn to block input:
+
+$$i_t \to 0$$
+
+Behavior depends on what minimizes loss.
 
 ### 4. Memory Is Compressed, Not Stored
 - 48 dimensions don't store 200 frames
@@ -373,7 +451,10 @@ Training determines:
 - Lossy compression optimized by training
 
 ### 5. Cell State Can Grow
-Despite $f_t \leq 1$, cell state can increase:
+Cell state can increase despite forget gate being bounded:
+
+$$f_t \leq 1$$
+
 $$c_t = \underbrace{f_t \odot c_{t-1}}_{\leq c_{t-1}} + \underbrace{i_t \odot \tilde{c}_t}_{\text{can be large}}$$
 
 The input term allows accumulation.
@@ -384,28 +465,55 @@ The input term allows accumulation.
 
 For `hidden_size=h` and `input_size=d`:
 
-**Weight matrices:** $4 \times h \times (h + d)$  
-**Bias vectors:** $4 \times h$  
-**Total:** $4h(h + d + 1)$
+**Weight matrices:**
 
-**Example:** $h=48$, $d=96$
-- Weight matrices: $4 \times 48 \times 144 = 27,648$
-- Biases: $4 \times 48 = 192$
-- **Total: 27,840 parameters**
+$$4 \times h \times (h + d)$$
+
+**Bias vectors:**
+
+$$4 \times h$$
+
+**Total:**
+
+$$4h(h + d + 1)$$
+
+**Example:** For $h=48$ and $d=96$:
+
+Weight matrices:
+
+$$4 \times 48 \times 144 = 27,648$$
+
+Biases:
+
+$$4 \times 48 = 192$$
+
+**Total: 27,840 parameters**
 
 ---
 
 ## Practical Considerations
 
 ### Choosing Hidden Size
-- Larger $h$ → more memory capacity → harder to train
-- Smaller $h$ → less memory capacity → faster training
-- Typical values: 32-512 depending on task complexity
+
+Larger hidden size:
+
+$$h \uparrow \implies \text{more memory capacity, harder to train}$$
+
+Smaller hidden size:
+
+$$h \downarrow \implies \text{less memory capacity, faster training}$$
+
+Typical values: 32-512 depending on task complexity
 
 ### Sequence Length
-- Training sequence length determines maximum learnable dependency
-- Longer sequences → better long-term learning → more computation
-- Typical values: 50-500 timesteps
+
+Training sequence length determines maximum learnable dependency.
+
+Longer sequences:
+
+$$T \uparrow \implies \text{better long-term learning, more computation}$$
+
+Typical values: 50-500 timesteps
 
 ### When to Use LSTM
 - Sequential data with long-term dependencies
@@ -427,8 +535,12 @@ $$c_t = f_t \odot c_{t-1} + i_t \odot \tilde{c}_t$$
 The **addition** (not multiplication) enables gradient flow through time, solving the vanishing gradient problem.
 
 **Three Key Ideas:**
-1. Separate internal memory ($c_t$) from output ($h_t$)
+
+1. Separate internal memory from output:
+   $$c_t \text{ (internal)}, \quad h_t \text{ (output)}$$
+
 2. Additive updates to cell state
+
 3. Learned gates control information flow
 
 **Bottom Line:** LSTMs are just four learned weight matrices that produce multipliers, combined with a carefully designed equation structure that prevents vanishing gradients and enables long-term memory.
@@ -452,9 +564,9 @@ Problems:
 **LSTM**
 
 States: Two separate vectors
-- $h_t$: Hidden state (filtered output, exposed externally)  
+- $h_t$: Hidden state (filtered output, exposed externally)
 - $c_t$: Cell state (internal memory, long-term storage)
 
-Key Advantage: Additive cell state updates prevent vanishing gradients, enabling learning of 100+ timestep dependencies.
+**Key Advantage:** Additive cell state updates prevent vanishing gradients, enabling learning of 100+ timestep dependencies.
 
-Key Difference: Regular RNN has no cell state vector, only hidden state. LSTM separates internal memory ($c_t$) from exposed output ($h_t$), allowing long-term information storage without interference.
+**Key Difference:** Regular RNN has no cell state vector, only hidden state. LSTM separates internal memory from exposed output, allowing long-term information storage without interference.
